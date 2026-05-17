@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>vay</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0c0c0c; color: #4a4030; font-family: 'Courier New', monospace;
+         display: flex; flex-direction: column; align-items: center;
+         justify-content: center; min-height: 100vh; }
+  canvas { display: block; }
+  #hud { margin-top: 16px; font-size: 11px; color: #3a2e20; letter-spacing: 0.05em; text-align: center; }
+  #hud a { color: #4a4030; text-decoration: none; }
+  #hud a:hover { color: #8a7a60; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud">
+  <span id="fp"></span><br>
+  <a href="https://github.com/Jakko-KAAMOS/vay">Jakko-KAAMOS/vay</a>
+  &nbsp;·&nbsp;
+  <a href="https://rebraining.org/practice">RekoTuroKaija</a>
+</div>
+<script>
+const FAM = [
+  ['#0c0c0c','#0e0c0a','#141210','#181614','#1c1a16','#201e18','#241e16','#2a2018','#2e2418','#342a1c','#3a2e20','#403428'],
+  ['#3a2010','#4a2e10','#5a3810','#6a4810','#7a5218','#8a5e18','#9a6820','#a87828','#b88830','#c89030','#f0a030','#f0b040','#f4b840','#f8c060','#fac870','#fcd078','#ffdd80','#ffe898','#fff0b0','#fff8d0'],
+  ['#3a3028','#4a4030','#5a5038','#6a6048','#706050','#7a6858','#8a7a60','#9a8a70','#aa9a80','#b0a080','#c0b090','#ccc0a0','#d0c0a0','#dfd0b0','#e8dcc0','#f0e8c8','#f4edd0','#f4eed8','#f8f4ec','#fcfaf4'],
+  ['#181818','#202020','#2c2c2c','#383838','#484848','#585858','#686868','#787878','#888888','#989898','#a8a8a8','#b8b8b8','#c8c8c8','#d8d8d8','#e8e8e8','#f4f4f4'],
+  ['#2a0808','#480c0c','#5a1c10','#7a2818','#9a3820','#d84830','#c82820','#e83820','#f04838','#f87860','#8a5030','#b89068','#c8a070','#c09060','#d0a878'],
+  ['#0c1808','#142010','#1e3018','#304828','#486838','#607840','#507840','#6a9030','#8ac068','#90c830','#78b890','#90c8a8','#98bc78','#c8e0b0','#e0ecd0','#ecf4e0'],
+  ['#081820','#102838','#182840','#285870','#385880','#3868a0','#3a7890','#4888a0','#40a0b0','#5080a0','#80b8cc','#88b8d0','#90c0d0','#b8d8e0','#d8eef4','#ecf8fc'],
+  ['#18081c','#280d30','#4a1858','#702890','#9038a8','#b858c0','#cc78d0','#e0a8e0'],
+];
+const PALETTE = FAM.flat();
+const N_PAL = PALETTE.length;
+
+// version encoded as rotation state
+// map_rot 0 = v0.0, increments with releases
+const MAP_ROT = 0;
+const PAL_OFFSET = 0;
+
+const WALK = [[-1,0,1],[-1,1,0],[0,1,-1],[1,0,-1],[1,-1,0],[0,-1,1]];
+const MAX_RING = 2;
+
+function buildSpiral() {
+  const seq = [[0,0,0]];
+  for (let ring = 1; ring <= MAX_RING; ring++) {
+    let [q,r,s] = [ring-1,-ring,1];
+    seq.push([q,r,s]);
+    for (let i = 0; i < WALK.length; i++) {
+      const steps = i === 0 ? ring-1 : ring;
+      for (let j = 0; j < steps; j++) {
+        q+=WALK[i][0]; r+=WALK[i][1]; s+=WALK[i][2];
+        seq.push([q,r,s]);
+      }
+    }
+  }
+  return seq;
+}
+
+const SPIRAL = buildSpiral();
+const STATIONS = {
+  '1,-2,1':'TAI','0,-2,2':'VAY','-1,-1,2':'GRI','-2,1,1':'KAA',
+  '-1,2,-1':'AAV','1,1,-2':'HEH','2,-1,-1':'POH','2,-2,0':'SOL'
+};
+
+function hx(h) {
+  const n = parseInt(h.slice(1), 16);
+  return `rgb(${(n>>16)&255},${(n>>8)&255},${n&255})`;
+}
+function luminance(h) {
+  const n = parseInt(h.slice(1), 16);
+  const r=(n>>16&255)/255, g=(n>>8&255)/255, b=(n&255)/255;
+  return 0.299*r + 0.587*g + 0.114*b;
+}
+function m2px(q,r,cx,cy,sz) {
+  return [cx + sz*1.5*q, cy + sz*(Math.sqrt(3)/2*q + Math.sqrt(3)*r)];
+}
+function flatCorners(cx,cy,sz) {
+  const pts = [];
+  for (let i=0;i<6;i++) pts.push([cx+sz*Math.cos(i*Math.PI/3), cy+sz*Math.sin(i*Math.PI/3)]);
+  return pts;
+}
+function hexPath(ctx,cx,cy,sz) {
+  const pts = flatCorners(cx,cy,sz);
+  ctx.beginPath(); ctx.moveTo(...pts[0]);
+  for (let i=1;i<6;i++) ctx.lineTo(...pts[i]);
+  ctx.closePath();
+}
+function fingerprint(map_rot) {
+  const rows = {};
+  SPIRAL.forEach(([q,r,s], ordn) => {
+    const ring = Math.max(Math.abs(q),Math.abs(r),Math.abs(s));
+    if (ring > 1) return;
+    const py = Math.sqrt(3)/2*r + Math.sqrt(3)*q*0.5;
+    const rk = Math.round(py*2);
+    const disp = ordn > 0 ? ((ordn-1-map_rot)%36+36)%36+1 : 0;
+    if (!rows[rk]) rows[rk] = [];
+    rows[rk].push(disp);
+  });
+  return '{' + Object.keys(rows).sort((a,b)=>a-b)
+    .map(k => '['+rows[k].slice().sort((a,b)=>a-b).join(',')+']').join(',') + '}';
+}
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let map_rot = MAP_ROT;
+let pal_offset = PAL_OFFSET;
+let t0 = performance.now();
+
+function resize() {
+  const s = Math.min(window.innerWidth, window.innerHeight - 60);
+  canvas.width = s; canvas.height = s;
+}
+
+function draw(ts) {
+  const elapsed = (ts - t0) / 1000;
+  map_rot = Math.floor(elapsed / 6.67) % 36;
+  pal_offset = map_rot;
+
+  const W = canvas.width, H = canvas.height;
+  const SZ = W / 10;
+  const CX = W/2, CY = H/2;
+
+  ctx.fillStyle = '#0c0c0c';
+  ctx.fillRect(0,0,W,H);
+
+  SPIRAL.forEach(([q,r,s], ordn) => {
+    const ring = Math.max(Math.abs(q),Math.abs(r),Math.abs(s));
+    if (ring > MAX_RING) return;
+    const [px,py] = m2px(q,r,CX,CY,SZ);
+    const is_h = q===0&&r===0&&s===0;
+    const skey = `${q},${r},${s}`;
+    const is_s = skey in STATIONS;
+
+    if (is_h) {
+      const pulse = 0.5 + 0.5*Math.sin(ts*0.001*Math.PI*0.8);
+      const v1 = [0x28,0x0d,0x30], v2 = [0x90,0x38,0xa8];
+      const col = v1.map((c,i)=>Math.round(c+pulse*(v2[i]-c)));
+      hexPath(ctx,px,py,SZ-2);
+      ctx.fillStyle = `rgb(${col.join(',')})`;
+      ctx.fill();
+      ctx.strokeStyle = `rgba(112,40,144,${0.6+pulse*0.4})`;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.fillStyle = `rgb(${[0xcc,0x78,0xd0].map((c,i)=>Math.round(c-pulse*20)).join(',')})`;
+      ctx.font = `bold ${SZ*0.28}px 'Courier New'`;
+      ctx.textAlign = 'center';
+      ctx.fillText('0', px, py + SZ*0.1);
+      ctx.fillStyle = '#702890';
+      ctx.font = `bold ${SZ*0.13}px 'Courier New'`;
+      ctx.fillText('HIL', px, py + SZ*0.32);
+    } else {
+      const disp = ((ordn-1-map_rot)%36+36)%36+1;
+      const pal_idx = (disp-1+pal_offset) % N_PAL;
+      const col = PALETTE[pal_idx];
+      const lum = luminance(col);
+      hexPath(ctx,px,py,SZ-2);
+      ctx.fillStyle = col;
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+      ctx.lineWidth = 0.6;
+      ctx.stroke();
+      const txt = lum < 0.45 ? '#f4f4f4' : '#181614';
+      const sta = lum < 0.45 ? '#f4f4f4' : '#3a2e20';
+      ctx.fillStyle = txt;
+      ctx.font = `bold ${SZ*0.28}px 'Courier New'`;
+      ctx.textAlign = 'center';
+      ctx.fillText(String(disp), px, py + SZ*0.1);
+      if (is_s) {
+        ctx.fillStyle = sta;
+        ctx.font = `bold ${SZ*0.12}px 'Courier New'`;
+        ctx.fillText(STATIONS[skey], px, py + SZ*0.32);
+      }
+    }
+  });
+
+  const fp = fingerprint(map_rot);
+  document.getElementById('fp').textContent = `${fp}  ·  rot ${map_rot}  ·  pal+${pal_offset}`;
+
+  requestAnimationFrame(draw);
+}
+
+window.addEventListener('resize', () => { resize(); });
+resize();
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>
