@@ -33,3 +33,9 @@ A side hustle.
 ## the station
 
 Messages enter the void and exit north.
+
+---
+
+## note on AI usage
+
+Developed with AI assistance under the RekoTuroKaija practice. See [contrib/AI.md](contrib/AI.md) and [rebraining.org/practice](https://rebraining.org/practice).
